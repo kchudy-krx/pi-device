@@ -3,7 +3,7 @@ name := "malinowka"
 lazy val commonSettings = Seq(
   version := "0.1-SNAPSHOT",
   organization := "pl.com.krx",
-  scalaVersion := "2.12.8",
+  scalaVersion := "2.12.10",
   test in assembly := {},
   libraryDependencies ++= Seq(
     "com.pi4j" % "pi4j-core" % "1.1",

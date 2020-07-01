@@ -1,123 +1,67 @@
 package pl.com.krx.malinowka
 
-import java.util.UUID
 import java.util.logging.{Level, Logger}
 
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import javax.net.ssl.SSLContext
-import org.apache.http.client.HttpClient
-import org.apache.http.client.methods.{CloseableHttpResponse, HttpPost}
-import org.apache.http.conn.ssl._
-import org.apache.http.entity.{BasicHttpEntity, ContentType, StringEntity}
-import org.apache.http.impl.client.{DefaultHttpClient, HttpClientBuilder, HttpClients}
-import org.apache.http.ssl.SSLContextBuilder
-import org.iot.raspberry.grovepi.devices.{GroveLightSensor, GroveTemperatureAndHumiditySensor, GroveTemperatureAndHumidityValue}
-import play.api.libs.json.{JsObject, Json}
-import play.api.libs.ws.StandaloneWSRequest
-import play.api.libs.ws.ahc.{AhcCurlRequestLogger, StandaloneAhcWSClient}
+import org.iot.raspberry.grovepi.devices.{GroveLightSensor, GroveRgbLcd, GroveTemperatureAndHumiditySensor, GroveTemperatureAndHumidityValue}
+import pl.com.krx.malinowka.modules.RestService
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
 import scala.util.{Failure, Success}
 
 object Application extends App {
   Logger.getLogger("GrovePi").setLevel(Level.WARNING)
   Logger.getLogger("RaspberryPi").setLevel(Level.WARNING)
 
-  var counter:Int = 0
+  var counter: Int = 0
 
   implicit val grovePi4S = new GrovePi4S()
 
-/*  val whiteDiode = new GroveDigitalDiode(3)
-  val button:GroveDigitalButton = new GroveDigitalButton(2)
-  val lcdDisplay: GroveRgbLcd = grovePi4S.grove.getLCD
-  lcdDisplay.setRGB(255,255,0)
-  lcdDisplay.setText(s"Ilosc naduszen: $counter")*/
 
-/*  private val buttonListener: ScheduledExecutorService = button.addListener((oldState, newState) ⇒ {
-    (oldState, newState) match {
-      case (NotPushed, Pushed) ⇒
-        counter = counter+1
-        whiteDiode.setState(On)
-      case _ ⇒ whiteDiode.setState(Off)
-    }
-    lcdDisplay.setText(s"Ilosc naduszen: $counter")
-  }, Schedule(0, 1, TimeUnit.MILLISECONDS))*/
-
-
-  private val temperatureAndHumiditySensor = new GroveTemperatureAndHumiditySensor(grovePi4S.grove,7,GroveTemperatureAndHumiditySensor.Type.DHT11)
+  private val temperatureAndHumiditySensor = new GroveTemperatureAndHumiditySensor(grovePi4S.grove, 7, GroveTemperatureAndHumiditySensor.Type.DHT11)
   private val temperatureAndHumidityValue: GroveTemperatureAndHumidityValue = temperatureAndHumiditySensor.get()
-  private val lightSensor: GroveLightSensor = new GroveLightSensor(grovePi4S.grove,0)
-  private val lightSensorValue:Double = lightSensor.get()
-  private val temperatureValue:Double = temperatureAndHumidityValue.getTemperature
-  private val humidityValue:Double = temperatureAndHumidityValue.getHumidity
+  private val lcd: GroveRgbLcd = grovePi4S.getLcd()
+  private val lightSensor: GroveLightSensor = new GroveLightSensor(grovePi4S.grove, 0)
+  private val lightSensorValue: Double = lightSensor.get()
+  private val temperatureValue: Double = temperatureAndHumidityValue.getTemperature
+  private val humidityValue: Double = temperatureAndHumidityValue.getHumidity
+
+  lcd.setRGB(0, 255, 0)
+
+  /*  6699e603-6e66-4070-b8c0-d841e02f918f	temp
+    b391f090-4fc6-46e2-97f7-49737d2d1e2c	hum
+  746992ae-40c8-49fb-924a-c6685e3ca92b	light*/
 
 
-  println(s"temperatura: $temperatureValue")
-  println(s"wilgotnosc: $humidityValue")
-  println(s"światło: $lightSensorValue")
+  val restService: RestService = new RestService(host = "http://192.168.0.213:8080")
+  val r = for {
+    _ <- Future {
+      lcd.setText(s"Sending temperature: $temperatureValue")
+    }
+    tempCode <- restService.send("6699e603-6e66-4070-b8c0-d841e02f918f", temperatureValue)
+    _ <- Future {
+      lcd.setText(s"Sending humidity: $humidityValue")
+    }
+    humCode <- restService.send("b391f090-4fc6-46e2-97f7-49737d2d1e2c", humidityValue)
+    _ <- Future {
+      lcd.setText(s"Sending lightValue: $lightSensorValue")
+    }
+    lightCode <- restService.send("746992ae-40c8-49fb-924a-c6685e3ca92b", lightSensorValue)
+  } yield (tempCode, humCode, lightCode)
 
-  import scala.concurrent.ExecutionContext.Implicits._
-/*  implicit val system: ActorSystem = ActorSystem()
-  system.registerOnTermination{
-    System.exit(0)
+  r.map(codes => lcd.setText(codes.toString()))
+
+  r.onComplete {
+    case Failure(exception) =>
+      lcd.setText(exception.getMessage)
+    case Success(value) =>
+
   }
-  implicit val materializer: ActorMaterializer = ActorMaterializer()*/
-  import play.api.libs.ws.JsonBodyWritables._
-
-  //val wsClient = StandaloneAhcWSClient()
-
-  val deviceId:UUID = UUID.fromString("24f759eb-164c-4054-853b-ab2fadead3ec")
-  val json:JsObject = Json.obj(
-    "temperature" → temperatureValue,
-    "humidity" → humidityValue,
-    "light" → lightSensorValue
-  )
-
-  val builder = new SSLContextBuilder()
-  builder.loadTrustMaterial(null, new TrustAllStrategy())
-
-  val sslsd:SSLConnectionSocketFactory = new SSLConnectionSocketFactory(
-    builder.build()
-  )
-
-  val httpClient = HttpClients.custom().setSSLSocketFactory(
-    sslsd
-  ).build()
-
-  val post = new HttpPost("https://piapi.krx.com.pl/api/data")
-  post.addHeader("Auth",deviceId.toString)
-  val jsonString = new StringEntity(json.toString(),ContentType.APPLICATION_JSON)
-  post.setEntity(jsonString)
-
-  private val response: CloseableHttpResponse = httpClient.execute(post)
-  val status = response.getStatusLine.getStatusCode
-  println(status)
 
 
+  Await.result(r, 10 seconds)
 
-
-/*
-  private val eventualResponse = wsClient.url("https://piapi.krx.com.pl/api/data")
-    .withHttpHeaders("Auth" → deviceId.toString)
-    .withRequestFilter(AhcCurlRequestLogger())
-    .post(json)
-
-  eventualResponse.onComplete {
-    case Failure(exception) ⇒
-      println(exception.getMessage)
-      throw exception
-    case Success(response) ⇒
-      response.status match {
-        case 204 ⇒ println("wysłano")
-        case status ⇒ println(s"poszlo nie tak: $status")
-      }
-  }
-  eventualResponse.andThen {
-    case _ ⇒ wsClient.close()
-  }.andThen {
-    case _ ⇒ system.terminate()
-  }*/
   grovePi4S.close().map(_ ⇒ println("done!"))
 }

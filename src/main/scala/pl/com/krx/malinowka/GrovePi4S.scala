@@ -1,5 +1,6 @@
 package pl.com.krx.malinowka
 
+import org.iot.raspberry.grovepi.devices.GroveRgbLcd
 import org.iot.raspberry.grovepi.pi4j.GrovePi4J
 import org.iot.raspberry.grovepi.{GroveAnalogIn, GroveAnalogOut, GroveDigitalIn, GroveDigitalOut}
 
@@ -13,6 +14,8 @@ class GrovePi4S()(implicit private val executionContext: ExecutionContext){
   def close(): Future[Unit] = Future {
     grove.close()
   }
+
+  def getLcd(): GroveRgbLcd = grove.getLCD
 
   def getDigitalOut(digitalPort: Int): GroveDigitalOut = grove.getDigitalOut(digitalPort)
 
