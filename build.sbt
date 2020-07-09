@@ -16,5 +16,5 @@ lazy val commonSettings = Seq(
 lazy val app = (project in file("."))
   .settings(commonSettings: _*)
   .settings(
-    mainClass in assembly := Some("pl.com.krx.malinowka.Application"),
+    mainClass in assembly := Some("pl.com.krx.malinowka.Application")
   )
